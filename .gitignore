@@ -4,3 +4,4 @@ bak/
 pytorch_exercise/exercise_hand
 data/fashion-mnist_test.csv
 data/fashion-mnist_train.csv
+img_search/common/dataset
