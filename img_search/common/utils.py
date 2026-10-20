@@ -19,3 +19,13 @@ def seed_everything(seed):
     torch.cuda.manual_seed(seed)  # 设置PyTorch GPU随机数种子
     torch.backends.cudnn.deterministic = True  # 确保CuDNN操作确定性
     torch.backends.cudnn.benchmark = False  # 禁用CuDNN性能优化
+
+def sorted_alphanum(img_names):
+    convert = lambda str: int(str) if str.isdigit() else str.lower()
+    alphanum_key = lambda name: [convert(x) for x in re.split( r'([0-9]+)', name)]
+    return sorted(img_names, key=alphanum_key)
+
+if __name__ == '__main__':
+    imgs = os.listdir('./dataset')
+    imgs = sorted_alphanum(imgs)
+    print(imgs)
