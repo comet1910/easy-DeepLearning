@@ -1,6 +1,11 @@
 import torch
 from torch.utils.data import DataLoader
 
+import sys
+from pathlib import Path
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
 from common.utils import *
 from denoising_config import *
 from denoising_data import create_datasets
