@@ -6,6 +6,9 @@ from PIL import Image
 from torch.utils.data import Dataset, random_split
 import torchvision.transforms as T
 
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 from common.utils import sorted_alphanum
 from classification_config import *
 
