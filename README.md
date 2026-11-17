@@ -182,16 +182,14 @@ CHROMA_INSERT_BATCH_SIZE = 5000             # 批量写入大小（2.4 万张图
 | `tqdm` | `>=4.70.1` | 4.70.1 | 进度条 |
 | `torchsummary` | `>=1.5.1` | 1.5.1 | 查看模型各层形状 |
 | `ipykernel` | `>=7.3.0` | 7.3.0 | Jupyter 内核 |
+| `flask` | `>=3.1.3` | 3.1.3 | Web 服务 |
+| `chromadb` | `>=1.5.9` | 1.5.9 | 相似图向量库 |
 
-**Web 与向量库相关（需手动安装）**：
+`flask` 与 `chromadb` 已写入 `pyproject.toml`，`uv sync` 会自动安装。若网络较慢，可指定国内镜像：
 
 ```bash
-uv add flask chromadb
-# 或使用 pip
-# .venv/bin/pip install flask chromadb
+uv sync -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
 ```
-
-> 当前 `pyproject.toml` 未声明 `flask`、`chromadb`，运行 Web 服务前必须补装。
 
 ### 3.3 本地部署步骤
 
@@ -203,14 +201,11 @@ cd easy-deeplearning
 # 2. 安装 uv（已安装可跳过）
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 3. 创建虚拟环境并安装依赖
+# 3. 创建虚拟环境并安装全部依赖（含 flask、chromadb）
 uv sync
 
-# 4. 安装 Web 依赖
-uv add flask chromadb
-
-# 5. 验证环境
-.venv/bin/python -c "import torch, torchvision, pandas; print(torch.__version__, torchvision.__version__)"
+# 4. 验证环境
+.venv/bin/python -c "import torch, torchvision, pandas, chromadb, flask; print(torch.__version__, torchvision.__version__)"
 ```
 
 **准备数据**（仓库中数据集已被 `.gitignore` 忽略，需本地放置）：
@@ -283,8 +278,9 @@ easy-deeplearning/
 │   │   ├── similarity_data.py
 │   │   ├── similarity_model.py
 │   │   ├── similarity_engine.py
+│   │   ├── similarity_embeddings.py   # ChromaDB 建库 / 取集合 / 相似检索
 │   │   ├── similarity_train.py
-│   │   ├── similarity_test.py         # 预留（当前为空）
+│   │   ├── similarity_test.py         # 检索测试（命中率 + 可视化）
 │   │   ├── encoder.pt
 │   │   └── decoder.pt
 │   │
@@ -385,7 +381,7 @@ cd img_search/web
 3. **商品分类** → 下方文本框显示「您搜索的商品类型是：上衣/鞋/包/下装/手表」；
 4. **相似商品** → 底部网格显示 Top-5 相似商品图。
 
-> 启动 Web 前需保证 `image_similarity/similarity_embeddings.py`（向量库封装模块）存在，且向量库已建库。详见「常见问题 Q7」。
+> 启动 Web 前需先建好向量库（见 5.3 与「常见问题 Q7」），并用 `PYTHONPATH=..` 启动，否则无法导入兄弟模块。
 
 ### 5.6 运行教程与练习
 
@@ -504,26 +500,34 @@ return noisy_imgs, tensor_image
 
 ### Q7. `ModuleNotFoundError: No module named 'image_similarity.similarity_embeddings'`
 
-**原因**：`web_app.py` 依赖 `image_similarity/similarity_embeddings.py`（ChromaDB 封装：`create_embeddings`、`get_embedding_collection`、`search_similar_image_ids`），该文件当前**尚未提交到仓库**。
+**原因**：没有在能搜索到 `img_search` 的路径下启动，或运行的是旧版本代码。注意从 `web/` 目录直接运行 `python web_app.py` 时，`sys.path` 只包含 `web/`，无法导入 `image_denoising`、`image_similarity` 等兄弟包。
 
-**解决**：补齐该模块后再启动 Web。其实现可直接参考 `img_search/test/chroma/` 下 6 个 notebook（客户端 → collection → CRUD → 自定义 EmbeddingFunction 的完整用法）：
+**解决**：显式把 `img_search` 加入 `PYTHONPATH`：
 
-- `1_get_start.ipynb`、`2_client_test.ipynb`：客户端与持久化
-- `4_collection_test.ipynb`：collection 创建
-- `5_crud_test.ipynb`：增删改查
-- `6_embedding_test.ipynb`：自定义 `EmbeddingFunction`（把 `ConvEncoder` 包成 chroma 的嵌入函数）
-- `3_similarity_test.ipynb`：相似度查询
+```bash
+cd img_search/web
+PYTHONPATH=.. ../../.venv/bin/python web_app.py
+```
 
-临时跳过 Web 时，可先只跑训练与测试脚本（5.1 ~ 5.4）。
+**首次使用向量库**：`web_app.py` 只读取已有集合，建库需要使用 `similarity_embeddings.create_embeddings(encoder)`。可先用少量图片验证：
+
+```bash
+cd img_search/image_similarity
+../../.venv/bin/python similarity_test.py --build 500
+```
+
+确认无误后，把 `web_app.py` 第 79 行的 `create_embeddings(encoder)` 取消注释、跑一次全量建库（24853 张图），再把该行注释回去。向量库默认落在 `image_similarity/chroma_backend`，路径以模块目录为基准，与运行时的工作目录无关。
 
 ### Q8. `ModuleNotFoundError: No module named 'flask'` / `'chromadb'`
 
-**原因**：这两个包未写入 `pyproject.toml`，`uv sync` 不会安装。
+**原因**：依赖尚未安装（`pyproject.toml` 已声明，但本地虚拟环境未同步）。
 
 **解决**：
 
 ```bash
-uv add flask chromadb
+uv sync
+# 网络较慢时使用清华镜像
+uv sync -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
 ```
 
 ### Q9. `NameError: name '__file__' is not defined`（notebook 中）
@@ -564,6 +568,6 @@ torch.load("xxx.pt", map_location="cpu")
 ## 七、其他说明
 
 - `img_search/test/` 是学习与调试区，包含去噪自编码器实验（`01`、`02`）与分类实验（`03`）notebook，以及 ChromaDB 用法验证；其中 `conv_autoencoder.pth`、`conv_denoiser.pth` 为实验产物。
-- `img_search/image_similarity/similarity_test.py` 当前为空文件，检索评估逻辑仍在 Web 层与 notebook 中验证。
-- `bak/`、`.venv/`、`pytorch_exercise/exercise_hand/`、`data/fashion-mnist_*.csv`、`img_search/common/dataset/` 均已在 `.gitignore` 中忽略。
+- `img_search/image_similarity/similarity_test.py` 提供检索测试：加载 `encoder.pt`，评估 Top-K 同类别命中率，并把「查询图 + Top-K 结果」保存为 `retrieval_result.png`（支持 `--build N` 用少量图片快速建库）。
+- `bak/`、`.venv/`、`pytorch_exercise/exercise_hand/`、`data/fashion-mnist_*.csv`、`img_search/common/dataset/`、`chroma_backend/`、`retrieval_result.png` 均已在 `.gitignore` 中忽略。
 - `pyproject.toml` 中的 `some-package>=0.1` 是占位依赖，可安全移除。

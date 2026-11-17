@@ -30,25 +30,29 @@ web/
 | 依赖 | 说明 |
 | --- | --- |
 | Python 环境 | 项目根目录的 `.venv`（Python 3.13） |
-| `flask` | 未写入 `pyproject.toml`，需手动安装 |
+| `flask` / `chromadb` | 已写入 `pyproject.toml`，`uv sync` 即可安装 |
 | 三个模型权重 | `../image_denoising/denoiser.pt`、`../image_classification/classifier.pt`、`../image_similarity/encoder.pt` |
-| 向量库模块 | `../image_similarity/similarity_embeddings.py`（需提供 `create_embeddings()`、`get_embedding_collection()`、`search_similar_image_ids()`） |
+| 向量库模块 | `../image_similarity/similarity_embeddings.py`（提供 `create_embeddings()`、`get_embedding_collection()`、`search_similar_image_ids()`） |
 | 图库数据 | `../common/dataset/`（24853 张图，文件名 `0.jpg` ~ `24853.jpg`） |
 
-安装缺失依赖：
+同步依赖（网络较慢时加国内镜像）：
 
 ```bash
-uv add flask chromadb
+uv sync
+# 或
+uv sync -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
 ```
 
 ### 2.2 启动
 
 ```bash
 cd img_search/web
-../../.venv/bin/python web_app.py
+PYTHONPATH=.. ../../.venv/bin/python web_app.py
 ```
 
-> **必须在 `web/` 目录下执行。** 脚本内所有路径都相对于当前工作目录，例如 `os.path.join('..', PACKAGE_NAME, 'denoiser.pt')` 和 `static_folder='../common/dataset'`，在仓库根目录启动会导致模型加载失败、静态图片 404。
+> **两个前提**：
+> 1. 必须在 `web/` 目录下执行。脚本内所有路径都相对于当前工作目录，例如 `os.path.join('..', PACKAGE_NAME, 'denoiser.pt')` 和 `static_folder='../common/dataset'`。
+> 2. 必须设置 `PYTHONPATH=..`（或把 `img_search` 设为 IDE 的 Sources Root）。`python web_app.py` 只会把 `web/` 加入 `sys.path`，无法导入 `image_denoising`、`image_classification`、`image_similarity` 等兄弟包。
 
 启动日志（正常情况）：
 
@@ -196,20 +200,30 @@ with torch.no_grad():
 ### Q1. `ModuleNotFoundError: No module named 'flask'`
 
 ```bash
-uv add flask chromadb
+uv sync
+# 或指定清华镜像
+uv sync -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
 ```
 
-### Q2. `ModuleNotFoundError: No module named 'image_similarity.similarity_embeddings'`
+### Q2. `ModuleNotFoundError: No module named 'image_similarity'` / `'image_denoising'`
 
-仓库中缺少 `../image_similarity/similarity_embeddings.py`，Web 无法启动。需补齐该模块，实现三个函数：
+不是文件缺失，而是**模块搜索路径**问题：`python web_app.py` 只把 `web/` 放进 `sys.path`。
 
-| 函数 | 作用 |
-| --- | --- |
-| `create_embeddings(encoder)` | 遍历图库 → `ConvEncoder` 编码 → 分 5 批写入 ChromaDB 持久化目录 |
-| `get_embedding_collection(encoder)` | 打开已有 collection，并绑定自定义 `EmbeddingFunction` |
-| `search_similar_image_ids(collection, image_tensor, cnt=5)` | 单张图查询 Top-`cnt`，返回 id 列表 |
+```bash
+cd img_search/web
+PYTHONPATH=.. ../../.venv/bin/python web_app.py
+```
 
-实现可参考 `img_search/test/chroma/` 下的 6 个 notebook（客户端、collection、CRUD、自定义 EmbeddingFunction、相似查询）。
+### Q2b. 向量集合为空 / `向量集合为空，请先调用 create_embeddings() 建库`
+
+Web 只读取已有集合，不会自动建库。先建库：
+
+```bash
+cd img_search/image_similarity
+../../.venv/bin/python similarity_test.py --build 500     # 先小规模验证
+```
+
+全量建库则在 `web_app.py` 中临时取消第 79 行 `similarity_embeddings.create_embeddings(encoder)` 的注释，启动一次后再注释回去。索引目录为 `image_similarity/chroma_backend`（以模块目录为基准，与 cwd 无关），建库与服务读取的是同一份。
 
 ### Q3. `FileNotFoundError: '../image_denoising/denoiser.pt'`
 

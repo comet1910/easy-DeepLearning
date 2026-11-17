@@ -128,16 +128,69 @@ CHROMA_INSERT_BATCH_SIZE = 5000
 
 ---
 
-## 六、已知缺口
+## 六、建库与检索
 
-| 位置 | 状态 | 影响 |
-| --- | --- | --- |
-| `image_similarity/similarity_embeddings.py` | **未提交** | Web 启动即 `ModuleNotFoundError`，需实现 `create_embeddings` / `get_embedding_collection` / `search_similar_image_ids` |
-| `image_similarity/similarity_test.py` | 空文件 | 检索模块缺少独立测试入口，评估仍在 Web 与 notebook 中进行 |
-| `pyproject.toml` | 未声明 `flask`、`chromadb` | `uv sync` 后仍需手动 `uv add flask chromadb` |
-| `common/dataset/` | 已 gitignore | 新克隆仓库需自行放置图库（331MB） |
+`similarity_embeddings.py` 负责把编码器和 ChromaDB 接起来，提供三个函数：
 
-`similarity_embeddings` 的实现可参考 [test/chroma/](test/chroma/) 下的 6 个 notebook：客户端与持久化、collection 创建、CRUD、自定义 `EmbeddingFunction`（把 `ConvEncoder` 包成嵌入函数）、相似查询。
+| 函数 | 作用 |
+| --- | --- |
+| `create_embeddings(encoder, limit=None)` | 遍历图库编码为 512 维向量，分批写入 `chroma_backend/`；重建时先删除旧集合 |
+| `get_embedding_collection(encoder)` | 打开（必要时创建）集合，并把编码器缓存为全局，供检索复用 |
+| `search_similar_image_ids(collection, tensor, cnt=5, exclude_ids=None)` | 单图检索，返回 Top-`cnt` 的图片 id（int 列表） |
+
+向量库路径以**模块目录**为基准（`image_similarity/chroma_backend`），与运行时工作目录无关，因此建库脚本与 Web 服务会读写同一个索引。
+
+### 快速验证（少量图片建库）
+
+```bash
+cd img_search/image_similarity
+../../.venv/bin/python similarity_test.py --build 500 --queries 20 --topk 5
+```
+
+输出示例：
+
+```
+使用设备：cpu
+编码器加载完成：encoder.pt
+正在用前 500 张图建库……
+向量库构建完成：500 条，目录 chroma_backend
+向量集合规模：500
+同类别命中率@5：0.8120（16/20）
+检索结果已保存：.../retrieval_result.png
+示例查询 id=0 → Top-5: [16, 12, 3, 32, 98]
+```
+
+`retrieval_result.png` 中每行是一次查询：第 1 列为查询图，其余为 Top-K 结果。命中同类别时行首标记 `hit`。
+
+### 全量建库
+
+```bash
+# 1. 确认图库与权重就绪后，用全量数据建库（24853 张，CPU 上较慢）
+cd img_search/image_similarity
+../../.venv/bin/python -c "
+import torch
+from similarity_model import ConvEncoder
+from similarity_embeddings import create_embeddings
+enc = ConvEncoder()
+enc.load_state_dict(torch.load('encoder.pt', map_location='cpu'))
+create_embeddings(enc)
+"
+
+# 2. 启动 Web（需要让 Python 找到 img_search 包）
+cd ../web && PYTHONPATH=.. ../../.venv/bin/python web_app.py
+```
+
+> 若在 IDE 中运行，把 `img_search` 设为 Sources Root，效果等同 `PYTHONPATH=..`。
+
+### 已知限制
+
+| 位置 | 说明 |
+| --- | --- |
+| `common/dataset/` | 已 gitignore，新克隆仓库需自行放置图库（331MB） |
+| Web 启动 | 必须在 `img_search/web` 下并设置 `PYTHONPATH=..`，否则导入兄弟包失败 |
+| 全量建库 | CPU 上编码 2.4 万张图耗时较长，建议先用 `--build` 验证流程 |
+
+`test/chroma/` 下的 6 个 notebook 保留了 ChromaDB 的原始用法（客户端与持久化、collection 创建、CRUD、自定义 `EmbeddingFunction`、相似查询），可作为修改检索逻辑时的参考。
 
 ---
 
@@ -150,6 +203,6 @@ CHROMA_INSERT_BATCH_SIZE = 5000
 | `FileNotFoundError: '../common/dataset/'` | 相对路径依赖工作目录 | 切到模块目录，或用 `Path(__file__).resolve().parents[1]` 定位 |
 | `size of tensor a (64) must match ... (68)` | 输入边长不是 8 的倍数 | `Resize` 改为 64 / 72 / 96 |
 | `cannot unpack non-iterable NoneType` | `__getitem__` 忘记 `return` | 返回 `(noisy, clean)` 元组 |
-| `No module named 'flask'` | 依赖未安装 | `uv add flask chromadb` |
+| `No module named 'flask'` | 依赖未安装 | `uv sync`（或 `uv sync -i 清华镜像`） |
 
 更多排查见 [../README.md](../README.md) 第六章。

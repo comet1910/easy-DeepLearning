@@ -5,3 +5,10 @@ pytorch_exercise/exercise_hand
 data/fashion-mnist_test.csv
 data/fashion-mnist_train.csv
 img_search/common/dataset
+
+# 生成物
+__pycache__/
+*.py[cod]
+img_search/image_similarity/chroma_backend
+img_search/web/chroma_backend
+retrieval_result.png
